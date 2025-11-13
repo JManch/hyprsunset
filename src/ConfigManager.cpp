@@ -26,12 +26,44 @@ void CConfigManager::init() {
     m_config.addSpecialConfigValue("profile", "gamma", Hyprlang::FLOAT{1.0f});
     m_config.addSpecialConfigValue("profile", "identity", Hyprlang::INT{0});
 
+    m_config.addSpecialCategory("gamma", Hyprlang::SSpecialCategoryOptions{.key = nullptr, .anonymousKeyBased = true});
+    m_config.addSpecialConfigValue("gamma", "gamma", Hyprlang::FLOAT{1.0f});
+    m_config.addSpecialConfigValue("gamma", "monitor", Hyprlang::STRING{""});
+
     m_config.commence();
 
     auto result = m_config.parse();
 
     if (result.error)
         Debug::log(ERR, "Config has errors:\n{}\nProceeding ignoring faulty entries", result.getError());
+}
+
+std::vector<MonitorGamma> CConfigManager::getMonitorGammas() {
+    std::vector<MonitorGamma> result;
+
+    auto                      keys = m_config.listKeysForSpecialCategory("gamma");
+    result.reserve(keys.size());
+
+    for (auto& key : keys) {
+        std::string monitor;
+        float       gamma;
+
+        try {
+            monitor = std::any_cast<Hyprlang::STRING>(m_config.getSpecialConfigValue("gamma", "monitor", key.c_str()));
+            gamma   = std::any_cast<Hyprlang::FLOAT>(m_config.getSpecialConfigValue("gamma", "gamma", key.c_str()));
+        } catch (const std::bad_any_cast& e) {
+            RASSERT(false, "Failed to construct Gamma: {}", e.what()); //
+        } catch (const std::out_of_range& e) {
+            RASSERT(false, "Missing property for Gamma: {}", e.what()); //
+        }
+
+        result.push_back(MonitorGamma{
+            .monitor = monitor,
+            .gamma   = gamma,
+        });
+    }
+
+    return result;
 }
 
 std::vector<SSunsetProfile> CConfigManager::getSunsetProfiles() {

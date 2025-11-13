@@ -17,8 +17,10 @@ using namespace Hyprutils::Memory;
 
 struct SOutput {
     SP<CCWlOutput> output;
-    uint32_t       id = 0;
+    uint32_t       id   = 0;
+    std::string    name = "";
     void           applyCTM(struct SState*);
+    void           registerListeners();
 };
 
 struct SState {
@@ -42,6 +44,11 @@ struct SSunsetProfile {
     bool          identity    = false;
 };
 
+struct MonitorGamma {
+    std::string monitor = "";
+    float       gamma   = 1.0f;
+};
+
 class CHyprsunset {
   public:
     float              MAX_GAMMA = 1.0f; // default
@@ -51,11 +58,13 @@ class CHyprsunset {
     SState             state;
     bool               m_bTerminate = false;
 
+    static void        commitCTMs();
     int                calculateMatrix();
     int                init();
     void               tick();
     void               loadCurrentProfile();
     SSunsetProfile     getCurrentProfile();
+    float              getMonitorGamma(std::string monitor);
     void               terminate();
 
     struct {
@@ -68,13 +77,13 @@ class CHyprsunset {
     } m_sEventLoopInternals;
 
   private:
-    static void                 commitCTMs();
     void                        reload();
     void                        schedule();
     int                         currentProfile();
     void                        startEventLoop();
 
     std::vector<SSunsetProfile> profiles;
+    std::vector<MonitorGamma>   monitorGammas;
 };
 
 inline std::unique_ptr<CHyprsunset> g_pHyprsunset;

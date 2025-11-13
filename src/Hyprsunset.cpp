@@ -60,14 +60,31 @@ static Mat3x3 matrixForKelvin(unsigned long long temp) {
 }
 
 void SOutput::applyCTM(struct SState* state) {
-    auto arr = state->ctm.getMatrix();
+    float  monitorGamma = g_pHyprsunset->getMonitorGamma(name);
+    Mat3x3 ctm          = state->ctm;
+    if (monitorGamma != 1.0f) {
+        auto gamma = monitorGamma / g_pHyprsunset->GAMMA;
+        Debug::log(NONE, "┣ Overriding gamma for monitor {} to {}%\n┃", name, gamma * 100);
+        ctm.multiply(std::array<float, 9>{gamma, 0, 0, 0, gamma, 0, 0, 0, gamma});
+    }
+    auto arr = ctm.getMatrix();
     state->pCTMMgr->sendSetCtmForOutput(output->resource(), wl_fixed_from_double(arr[0]), wl_fixed_from_double(arr[1]), wl_fixed_from_double(arr[2]), wl_fixed_from_double(arr[3]),
                                         wl_fixed_from_double(arr[4]), wl_fixed_from_double(arr[5]), wl_fixed_from_double(arr[6]), wl_fixed_from_double(arr[7]),
                                         wl_fixed_from_double(arr[8]));
 }
 
+void SOutput::registerListeners() {
+    output->setName([this](CCWlOutput* r, const char* name_) { name = name_; });
+
+    output->setDone([this](CCWlOutput* r) {
+        applyCTM(&g_pHyprsunset->state);
+        g_pHyprsunset->commitCTMs();
+    });
+}
+
 void CHyprsunset::commitCTMs() {
     g_pHyprsunset->state.pCTMMgr->sendCommit();
+    wl_display_flush(g_pHyprsunset->state.wlDisplay);
 }
 
 int CHyprsunset::calculateMatrix() {
@@ -130,7 +147,8 @@ int CHyprsunset::init() {
 
             Debug::log(NONE, "┣ Found new output with ID {}, binding", name);
             auto o = state.outputs.emplace_back(
-                makeShared<SOutput>(makeShared<CCWlOutput>((wl_proxy*)wl_registry_bind((wl_registry*)state.pRegistry->resource(), name, &wl_output_interface, 3)), name));
+                makeShared<SOutput>(makeShared<CCWlOutput>((wl_proxy*)wl_registry_bind((wl_registry*)state.pRegistry->resource(), name, &wl_output_interface, 4)), name));
+            o->registerListeners();
 
             if (state.initialized) {
                 Debug::log(NONE, "┣ already initialized, applying CTM instantly", name);
@@ -149,9 +167,11 @@ int CHyprsunset::init() {
         return 0;
     }
 
-    Debug::log(NONE, "┣ Found {} output(s), applying CTMs", state.outputs.size());
+    calculateMatrix();
 
-    reload();
+    Debug::log(NONE, "┣ Found {} output(s), waiting for them to become ready...", state.outputs.size());
+    wl_display_roundtrip(state.wlDisplay);
+    Debug::log(NONE, "┣ All monitors are ready and initial CTMs have been applied.");
 
     state.initialized = true;
 
@@ -167,6 +187,19 @@ int CHyprsunset::init() {
     startEventLoop();
 
     return 1;
+}
+
+float CHyprsunset::getMonitorGamma(std::string monitor) {
+    for (auto& m : monitorGammas) {
+        if (m.monitor == monitor) {
+            if (m.gamma < 0 || m.gamma > MAX_GAMMA) {
+                Debug::log(NONE, "✖ Gamma for monitor {} invalid: {}%. The gamma has to be between 0% and {}%", m.monitor, GAMMA * 100, MAX_GAMMA * 100);
+                return 1.0f;
+            }
+            return m.gamma;
+        }
+    }
+    return 1.0f;
 }
 
 void CHyprsunset::startEventLoop() {
@@ -275,12 +308,11 @@ void CHyprsunset::reload() {
     }
 
     commitCTMs();
-
-    wl_display_flush(state.wlDisplay);
 }
 
 void CHyprsunset::loadCurrentProfile() {
-    profiles = g_pConfigManager->getSunsetProfiles();
+    monitorGammas = g_pConfigManager->getMonitorGammas();
+    profiles      = g_pConfigManager->getSunsetProfiles();
 
     Debug::log(NONE, "┣ Loaded {} profiles", profiles.size());
 
